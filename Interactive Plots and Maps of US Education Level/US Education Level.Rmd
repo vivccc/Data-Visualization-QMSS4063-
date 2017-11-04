@@ -1,0 +1,198 @@
+---
+title: "US Education Level"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+# Preprocessing Data
+setwd("/Users/youyang/Downloads")
+# Importing the data
+library(readxl)
+edu_wide <- read_excel("Education.xls", skip=5)
+edu_wide <- edu_wide[,-grep("x_", names(edu_wide))]
+edu_wide <- as.data.frame(edu_wide)
+
+# Convert from wide to long
+library(reshape)
+edu_long <- stats::reshape(edu_wide, 
+                    varying = names(edu_wide)[4:23],
+                    direction = "long",
+                    idvar = c("fips_code"),
+                    timevar = "year",
+                    sep = "_")
+
+# Identify states and counties
+edu_long$area_type <-  ifelse(as.numeric(substr(edu_long$fips_code,3,5))!=0,"county","state")
+edu_long$area_type <-  ifelse(as.numeric(substr(edu_long$fips_code,1,5))==0,"country",edu_long$area_type)
+
+```
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+##### Setup
+library(plotly)
+library(ggthemes)
+library(dplyr)
+library(ggplot2)
+
+```
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+d_country <- edu_long[edu_long$area_type=="country", ]
+
+p_country <- plot_ly(d_country, x = ~year, y = ~lessHS, type = "bar", 
+                     name = "<High school", color = I("palegreen")) %>%
+  add_trace(y = ~HS, name = "High school", 
+            color = I("orange")) %>%
+  add_trace(y = ~somecoll, name = "Some College", 
+            color = I("lightblue2")) %>%
+  add_trace(y = ~coll, name = ">=College",
+            color = I("lightpink")) %>%
+  layout(title = "1970 - 2015 US Education Level", 
+         yaxis = list(title = 'Percentage'), 
+         xaxis = list(title = 'Year'),
+         barmode = 'stack',
+         legend = list("Less than a high school diploma", 
+                       "High school diploma only", 
+                       "Some college (1-3 years)",
+                       "Four years of college or higher")) 
+p_country
+
+```
+
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+# Seperate by Region
+d_state <- edu_long[edu_long$area_type=="state", ]
+west <- c("WA", "OR", "ID", "MT", "WY", "CO", "UT", "NV", "CA", "AZ", "NM")
+midwest <- c("ND", "SD", "NE", "KS", "MO", "IA", "MN", "WI", "IL", "MI", "IN", "OH")
+south <- c("OK", "TX", "LA", "AR", "MS", "KY", "TN", "AL", "GA", "SC", "FL", "NC", "VA", "DC", "MD", "DE", "WV")
+northeast <- c("NY", "ME", "VT", "NH", "CT", "NJ", "RI", "PA", "MA")
+other <- c("AK", "HI")
+
+d_state$region <- ifelse(d_state$state %in% west, "west",
+            ifelse(d_state$state %in% midwest, "midwest",
+                   ifelse(d_state$state %in% south, "south",
+                          ifelse(d_state$state %in% northeast, "northeast",
+                                 "others"))))
+
+p_state_region <- ggplot(d_state, aes(x = year, color = state, y = coll, 
+                                      label = somecoll, label2 = HS,label3 = lessHS)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_smooth(lwd=0.2) +
+  facet_grid(region~.) +
+  theme_minimal() +
+  xlab("Year") + 
+  ylab("Percent College and Above") + 
+  ggtitle("1970-2015 US Education Level by Region") +
+  theme(plot.title = element_text(hjust = 0.5, size = 15))
+ggplotly(p_state_region)
+
+```
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+# Data Table
+d_county <- edu_long[edu_long$year == 2015 & edu_long$area_type == "county", ]
+d_county$pct_lessHS <- ecdf(d_county$lessHS)(d_county$lessHS)
+d_county$pct_HS <- ecdf(d_county$HS)(d_county$HS)
+d_county$pct_somecoll <- ecdf(d_county$somecoll)(d_county$somecoll)
+d_county$pct_coll <- ecdf(d_county$coll)(d_county$coll)
+
+library(scales)
+d_county$overall <- percent(rowMeans(d_county[ ,10:13]))
+county <- select(d_county, state, county = area_name, "Education Percentile" = overall)
+rownames(county) <- NULL
+
+library(DT)
+datatable(county)
+
+```
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+# Leaflet
+d_county$overall <- rowMeans(d_county[ ,10:13])
+library(leaflet)
+## Get U.S. county shape files from U.S. census department
+library(tigris)
+counties <- counties(state = "New York")
+
+combined <- counties@data %>%
+  left_join(d_county, by = c(NAMELSAD = "area_name"))
+counties@data <- combined
+
+# Color by quantile
+m = leaflet(counties) %>% 
+    setView(lng = -75, lat = 42.5, zoom = 6) %>%
+  # Base Groups = Background layer
+    addTiles(group = "OpenStreetMap") %>%
+    addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
+    addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+  # Data Layers
+    # First Data Layer: Overall Education Level
+    addPolygons(group = "Overall Education Level",
+                stroke = FALSE, fillOpacity = 0.5, smoothFactor = 0.5,
+                color = ~colorQuantile("Blues", overall)(overall),
+                popup = paste("State:", counties$state ,"<br/>",
+                  "County:",counties$NAME,"<br/>",
+                  "Overall Education Percentile:", percent(counties$overall), "<br/>",
+                  "College and Beyond:", counties$coll, "%", "<br/>",
+                  "Some College:", counties$somecoll, "%", "<br/>",
+                  "High School:", counties$HS, "%", "<br/>",
+                  "< High School:", counties$lessHS, "%")) %>%
+    # Second Data Layer: College and Beyond
+    addPolygons(group = "College and Beyond",
+    stroke = FALSE, fillOpacity = 0.5, smoothFactor = 0.5, 
+    color = ~colorQuantile("Purples", HS)(HS),
+    popup = paste("State:", counties$state ,"<br/>",
+                  "County:",counties$NAME,"<br/>",
+                  "Overall Education Percentile:", percent(counties$overall), "<br/>",
+                  "College and Beyond:", counties$coll, "%", "<br/>",
+                  "Some College:", counties$somecoll, "%", "<br/>",
+                  "High School:", counties$HS, "%", "<br/>",
+                  "< High School:", counties$lessHS, "%")) %>%
+    # Third Data Layer: Some College
+    addPolygons(group = "Some College",
+    stroke = FALSE, fillOpacity = 0.5, smoothFactor = 0.5, 
+    color = ~colorQuantile("Greens", somecoll)(somecoll),
+    popup = paste("State:", counties$state ,"<br/>",
+                  "County:",counties$NAME,"<br/>",
+                  "Overall Education Percentile:", percent(counties$overall), "<br/>",
+                  "College and Beyond:", counties$coll, "%", "<br/>",
+                  "Some College:", counties$somecoll, "%", "<br/>",
+                  "High School:", counties$HS, "%", "<br/>",
+                  "< High School:", counties$lessHS, "%")) %>% 
+    # Fourth Data Layer: High School
+    addPolygons(group = "High School",
+    stroke = FALSE, fillOpacity = 0.5, smoothFactor = 0.5, 
+    color = ~colorQuantile("Reds", HS)(HS),
+    popup = paste("State:", counties$state ,"<br/>",
+                  "County:",counties$NAME,"<br/>",
+                  "Overall Education Percentile:", percent(counties$overall), "<br/>",
+                  "College and Beyond:", counties$coll, "%", "<br/>",
+                  "Some College:", counties$somecoll, "%", "<br/>",
+                  "High School:", counties$HS, "%", "<br/>",
+                  "< High School:", counties$lessHS, "%")) %>%
+    # Fourth Data Layer: Below High School
+    addPolygons(group = "Below High School",
+    stroke = FALSE, fillOpacity = 0.5, smoothFactor = 0.5, 
+    color = ~colorQuantile("Greys", lessHS)(lessHS),
+    popup = paste("State:", counties$state ,"<br/>",
+                  "County:",counties$NAME,"<br/>",
+                  "Overall Education Percentile:", percent(counties$overall), "<br/>",
+                  "College and Beyond:", counties$coll, "%", "<br/>",
+                  "Some College:", counties$somecoll, "%", "<br/>",
+                  "High School:", counties$HS, "%", "<br/>",
+                  "< High School:", counties$lessHS, "%")) %>%
+    # Layers Control
+    addLayersControl(
+      baseGroups = c("OpenStreetMap", "Toner", "Toner Lite"),
+      overlayGroups = c("Overall Education Level", "College and Beyond", 
+                        "Some College", "High School", "Below High School"),
+      options = layersControlOptions(collapsed = TRUE))
+m
+
+```
+
