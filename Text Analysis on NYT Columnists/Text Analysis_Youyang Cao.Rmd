@@ -1,0 +1,306 @@
+---
+title: "Text Analysis Youyang Cao"
+output: github_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(quanteda)
+library(dplyr)
+library(tm) 
+library(qdap) 
+library(qdapDictionaries)
+library(tidytext)
+library(ggplot2)
+library(ggthemes)
+library(wordcloud)
+library(tidyverse)
+library(wesanderson)
+library(gridExtra)
+library(stringr)
+
+load("nytimes_oped_corpus.rda")
+
+subjects <- gsub( " *\\(.*?\\) *", "", corpus$documents$subject) # Remove parentheses
+subjects <- strsplit(subjects, ";")  # Split by ';' into a list
+subjects <- lapply(subjects, FUN=trimws) # Remove whitespace
+subjectlist <- unique(unlist(subjects))  # Make into a list, remove whitespace
+top10subjects <- rownames(sort(table(unlist(subjects)), decreasing=TRUE)[2:21])
+# Check for Top 10 Subjects --  you could alter this list before this step, i.e. by 
+# combining all the election topics
+subjects <- lapply(subjects, FUN= function(A,B){top10subjects[match(A,top10subjects)]})
+subjects <- lapply(subjects, function(x) x[!is.na(x)])
+
+nyt.df <- corpus$documents
+for (i in 1:dim(nyt.df)[1]) {
+  filename <- paste0("texts/", 1000+i, nyt.df$author[i], "-", nyt.df$date[i], ".txt")
+  sink(file = filename) %>% # open file to write 
+  cat(nyt.df[i,"texts"])  # write the file
+  sink()
+}
+
+nyt <- VCorpus(DirSource("texts/"))
+
+```
+
+### I Comparing NY Times Columnists
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+removeNumPunct <- function(x){gsub("[^[:alpha:][:space:]]*", "", x)}
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus,content_transformer(tolower))
+  corpus <- tm_map(corpus, content_transformer(replace_symbol))
+  corpus <- tm_map(corpus, removeWords, c(stopwords("en")))
+  corpus <- tm_map(corpus, stripWhitespace)
+  corpus <- tm_map(corpus, removeNumbers)
+  corpus <- tm_map(corpus, content_transformer(removeNumPunct))
+  return(corpus)
+}
+
+tst <- clean_corpus(nyt)
+tst_stemmed <- tm_map(tst, stemDocument)
+tst_tdm <- TermDocumentMatrix(tst_stemmed)
+tst_td <- tidy(tst_tdm)
+
+tst_td$document <- substr(tst_td$document, 5, nchar(tst_td$document) - 4)
+tst_td$date <- substr(tst_td$document, nchar(tst_td$document) - 9, nchar(tst_td$document))
+tst_td$author <- substr(tst_td$document, 1, nchar(tst_td$document) - 11)
+
+```
+
+To compare the five columnists articles, first we take a glimpse at the words that appear most in NYT as a whole. As can be seen from the bar plot below, election is a very popular topic: "Trump" and "Hilary" are the hottest words during the time period. Political, societal and economic topics are much mentioned, as can be seen from the terms: "tax", "party", "republican", "health", "refuge", "economy", "children", "trade".
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Frequency plot for all articles
+tst_tf_idf <- tst_td %>%
+    bind_tf_idf(term, document, count) %>%
+    arrange(desc(tf_idf))
+
+tst_tf_idf %>% group_by(term) %>%
+  summarise(nn = sum(tf_idf)) %>%
+  top_n(n = 20, wt = nn) %>%
+  mutate(term = reorder(term, nn)) %>%
+  ggplot(aes(term, nn, fill = nn)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  xlab("Term") + 
+  ylab("Frequency") + 
+  ggtitle("Top 20 Terms Used in NYT") + 
+  theme_bw() +
+  theme(panel.grid.major.y = element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(), legend.position="none") +
+  scale_fill_gradient(low="brown", high="yellow") +
+  theme(plot.title = element_text(hjust = 0.5, size = 18, face = "bold"))
+ 
+```
+
+Then we look at the top words of the five columnists separately. The plot below shows the most used words for the 5 columnists and the frequency of words respectively, weight by relative importance. We find that David Brooks most used words are "caucus", "douglass", "enlighten", "exodus", "marrig", which are largely on political and cultural topics. For Maureen Dowd, the most used words are "sorri", "apatow", "dinklag", "blair", which reveal her as a writer on American politics, popular culture and international affairs. For Nicholas Kristof, the top words are "poem", "rafi", "mar", "backkpag", "chicken", "vpdebat". For Paul Krugman, some top words are "gordon", "stock", "halmilton", "pollute", "deficit", "debt" and "brexit", which correspond to his background as an economist. For Thomas Friedman, some top words are "isreal", "ghonim", "isis", "hybrid", which show his interest in middle east issues. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# five author top 10 tf-idf
+tst_tf_idf <- tst_td %>%
+    bind_tf_idf(term, document, count) %>%
+    arrange(desc(tf_idf))
+
+b <- tst_tf_idf %>% 
+    group_by(author) %>%
+    top_n(n = 10, wt = tf_idf) %>%
+    mutate(key = 1:10)  %>%
+    arrange(author,desc(tf_idf))  %>%
+    ungroup()  %>%
+    mutate(idx_label = 50:1) 
+
+b %>% ggplot() +
+    geom_bar(aes(x = idx_label, y = tf_idf, fill = tf_idf), stat = "identity") +
+    scale_x_continuous(breaks = b$idx_label,labels = b$term) +
+    facet_wrap(~author, scales="free_y") +
+    xlab("Term") + 
+    ylab("Frequency") + 
+    coord_flip() +
+    ggtitle("Top 10 Terms Used for 5 Columnists") + theme_bw() +
+    guides(fill=guide_legend(title="Frequency", reverse = TRUE)) +
+    theme_tufte() +
+    scale_fill_gradient(low="black", high="purple") +
+    theme(plot.title = element_text(hjust = 0.5, size = 18, face = "bold"))
+
+```
+
+The wordclouds below show the common and dissimilar words among the five columnists. Politics and election in particular, are the common topic, as can be seen from words "Trump", "republican", "campaign"; social media is also popular topic, shown from "facebook" and "twitter". Aside from the commonly mentioned topics, we can also detect the shared language usage patterns such as "will", "time", "people", "like", which can be of interest for linguistic study.
+
+The word cloud for dissimilar words show that Nicholas Kristof talks more about racial and gender issues, as well as social media ("women", "black", "refuge", "gun", "youtube", "google"); Maureen Dowd is more concerned with politics, as shown in words such as "washington", "clinton", "melania"; David Brooks writes more about cultural and social issues ("cultur", "love", "moral"); Thomas Friedman writes more about middle east topics and international issues ("isreal", "europ", "world"); and Paul Krugman writes more on economics topics and public policies ("tax", "obamacare", "rate").
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Wordcloud
+purple_orange <- brewer.pal(10, "PuOr")
+purple_orange <- purple_orange[-(1:2)]
+
+new <- tst_td[, -c(2, 4)]
+new2 <- aggregate(new['count'], by = new[c('term', 'author')], sum)
+five_matrix <- spread(new2, author, count)
+five_matrix[is.na(five_matrix)] <- 0
+rownames(five_matrix) <- five_matrix[,1]
+five_matrix2 <- five_matrix[,-1]
+
+set.seed(1)
+layout(matrix(c(1, 2), nrow=2), heights=c(1, 4))
+par(mar=rep(0, 4))
+plot.new()
+text(x=0.5, y=0.5, "Common Words Among Authors", cex = 1.5)
+commonality.cloud(as.matrix(five_matrix2), colors =  purple_orange, max.words = 100)
+
+set.seed(1)
+layout(matrix(c(1, 2), nrow=2), heights=c(1, 4))
+par(mar=rep(0, 4))
+plot.new()
+text(x=0.5, y=0.5, "Dissimilar Words Among Authors", cex = 1.5)
+comparison.cloud(as.matrix(five_matrix2), colors = c("violetred1", "skyblue", "palegreen", "peachpuff", "lightsalmon"), max.words = 100, scale=c(.1,1.2), title.size = 1)
+
+```
+
+### II Lingustic Complexity of NY Times Columns
+Based on the Flesch-Kincaid Reading Ease Score, we can see that despite the slight differences in score (Thomas Friedman ranks highest and David Brooks lowest), the average score are all around 10, which is college graduate level. The difficulty level for Paul Krugman has the smallest range, while the linguist complexity for Maureen Dowd can be more difficult than others in some cases (as low as 3.9). Nicholas Kristof has the largest range considering all articles (from 4.9 to 19.5).
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE}
+nyt_corpus <- corpus(nyt)
+FRE_nyt <- textstat_readability(nyt_corpus, measure = 'Flesch.Kincaid')
+
+FKscore <- as.data.frame(FRE_nyt)
+FKscore$author <- corpus$documents$author
+
+box <- ggplot(data = FKscore, aes(x = author, y = FRE_nyt, fill = author))
+box <- box + geom_boxplot() + 
+  geom_jitter(shape=21,color="royalblue3", position=position_jitter(w=0.1)) +
+  stat_summary(geom="text", fun.y=quantile,
+               aes(label=sprintf("%1.1f", ..y..)),
+               position=position_nudge(x=0.33), size = 3, color = "violetred4") +
+  theme_tufte() +
+  scale_fill_manual(values=wes_palette(n=5, name="Royal2"))+
+  guides(color=guide_legend(title="Author", reverse = TRUE)) +
+  coord_flip() +
+  xlab("Author") + 
+  ylab("Flesch-Kincaid Reading Ease score") + 
+  ggtitle("Writing Complexity of Five Authors") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))
+
+box
+
+```
+
+### III Sentiment Analysis
+
+First we look at the words that are associated with "Trump" and "Clinton". As shown in the plot, for "trump", the most associated word of interest are "tower", "mogul", "litigi", "condo", which targets at his wealth. As for "Clinton", those words are "westchest" , "bloombergwealth", "bennett", "babylonian", which of wider range in topics are related to current events and personal life such as her house at Westchester, being criticised as "whore of babylon", Clinton's superdelegate Michael Bennet, her pantsuits.
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE}
+# Trump
+asc_trump <- findAssocs(tst_tdm, "trump", 0.2)
+asc_trump$trump <- asc_trump$trump[2:16]
+asc_trump_df <- list_vect2df(asc_trump)[, 2:3]
+
+plot_trump <- ggplot(asc_trump_df, aes(y = asc_trump_df[, 1])) + 
+  geom_point(aes(x = asc_trump_df[, 2], color =asc_trump_df[, 2]), 
+             data = asc_trump_df, size = 3) + 
+  xlab("Word Association") + ylab(NULL) + 
+  ggtitle("Word Associated with `Trump'") + theme_bw() +
+  guides(color=guide_legend(title="Association Rate", reverse = TRUE))
+
+# Clinton
+asc_clinton <- findAssocs(tst_tdm, "clinton", 0.2)
+asc_clinton$clinton <- asc_clinton$clinton[1:15]
+asc_clinton_df <- list_vect2df(asc_clinton)[, 2:3]
+
+plot_clinton <- ggplot(asc_clinton_df, aes(y = asc_clinton_df[, 1], color =asc_trump_df[, 2])) + 
+  geom_point(aes(x = asc_clinton_df[, 2]), 
+             data = asc_clinton_df, size = 3) + 
+  xlab("Word Association") + ylab(NULL) + 
+  ggtitle("Word Associated with `Clinton'") + theme_bw() +
+  guides(color=guide_legend(title="Association Rate", reverse = TRUE)) +
+  scale_colour_gradient(high = "red")
+
+grid.arrange(plot_trump, plot_clinton, nrow = 2)
+
+```
+
+Second, I analyze how the tone of the texts differ between the two candidates and across the columnists. The boxplot below shows that the sentiment related to the two candidates are generally central or negative. David Brooks and Paul Krugman have slight positive attitudes in their articles towards Clinton, and negative sentiments towards Trump; Maureen Dowd has similar negative sentiment towards the two candidates; Nicholas Kristof has negative sentiment for Clinton, and a stronger negative sentiment for Trump. In contrast, Thomas Friedman did not mention Clinton, and has positive sentiment towards Trump.
+
+```{r, echo=FALSE,warning=FALSE, message=FALSE}
+pos <- read.table("positive-words.txt", as.is=T)
+neg <- read.table("negative-words.txt", as.is=T)
+
+sentiment <- function(words){
+  n = length(words)
+  out = rep(NA_real_, n)
+  for (i in 1:n){
+  tok <- quanteda::tokenize(words[i])
+  pos.count <- sum(tok[[1]]%in%pos[,1])
+  neg.count <- sum(tok[[1]]%in%neg[,1])
+  out[i] <- (pos.count - neg.count)/(pos.count+neg.count)
+  }
+  return(out)
+}
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+corpus$documents$trump_article <- grepl("TRUMP", corpus$documents$person, fixed=TRUE)
+corpus$documents$clinton_article <- grepl("CLINTON", corpus$documents$person, fixed=TRUE)
+
+# Only Trump
+corpus$documents$trump_only <- ifelse(corpus$documents$trump_article == TRUE & corpus$documents$clinton_article == FALSE, 1, 0)
+# Only Clinton
+corpus$documents$clinton_only <- ifelse(corpus$documents$trump_article == FALSE & corpus$documents$clinton_article == TRUE, 1, 0)
+
+corpus$documents_trump <- corpus$documents[corpus$documents$trump_only == 1, ]
+corpus$documents_clinton <- corpus$documents[corpus$documents$clinton_only == 1, ]
+
+corpus$documents_trump$sentiment <- sentiment(corpus$documents_trump$texts)
+corpus$documents_clinton$sentiment <- sentiment(corpus$documents_clinton$texts)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+score <- rbind(corpus$documents_trump, corpus$documents_clinton)
+score$Candidates <- ifelse(score$trump_only==1, "Trump", "Clinton")
+
+box <- ggplot(data = score, aes(x = author, y = sentiment, fill = author)) +
+  geom_boxplot(alpha = 0.9) +
+  facet_grid(~ Candidates) +
+  xlab("Author") + ylab("Sentiment Score") + ggtitle("Sentiment Score by Author") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank()) +
+  theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold")) +
+  guides(fill=guide_legend(title="Author")) +
+  scale_fill_manual(values=wes_palette(n=5, name="Moonrise3"))
+  
+box
+
+```
+
+Looking at the development of sentiment towards the candidates over time, we can see the pattern is affected by major political events. There is a plummet for the sentiment for Trump when he was nominated as the Republican party leader, and the sentiment for Clinton experienced an increase. The first debate rendered the sentiment for both candidate drop. Since the election day, the sentiment for Clinton kept increasing, while the sentiment for Trump experienced a drop during inauguration. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+score$month <- substr(score$date, 1, 7)
+
+final <- group_by(score, Candidates, month) %>%
+  summarise(ave = mean(sentiment))
+
+pattern <- ggplot(data = final, aes(x = month, y = ave, col = Candidates)) +
+  geom_point(aes(shape = Candidates)) +
+  geom_line(aes(group = Candidates)) +
+  theme_minimal() +
+  annotate("text", x = 7.8, y = 0.1, label = "Party Conventions", size = 3) +
+  annotate("text", x = 11.3, y = 0.1, label = "Election Day", size = 3) +
+  annotate("text", x = 9.8, y = 0.08, label = "First Debate", size = 3) +
+  annotate("text", x = 13.3, y = 0.08, label = "Inauguration", size = 3) +
+  geom_segment(aes(x = 7.8, y = -0.33, xend = 7.8, yend = 0.06),color = "lightgoldenrod3", linetype = 2) +
+  geom_segment(aes(x = 11.3, y = -0.33, xend = 11.3, yend = 0.06),color = "lightgoldenrod3", linetype = 2) +
+  geom_segment(aes(x = 9.8, y = -0.33, xend = 9.8, yend = 0.06),color = "lightgoldenrod3", linetype = 2) +
+  geom_segment(aes(x = 13.2, y = -0.33, xend = 13.2, yend = 0.06),color = "lightgoldenrod3", linetype = 2) +
+  theme(panel.grid.major.x = element_blank()) +
+  xlab("Month") + ylab("Sentiment Score") + ggtitle("Sentiment Over Time") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"), axis.text.x = element_text(angle = 45, hjust = 1))
+pattern
+
+```

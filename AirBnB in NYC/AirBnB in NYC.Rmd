@@ -1,0 +1,442 @@
+---
+title: "HW2_yyc"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+
+library(ggplot2)
+library(ggmap)
+library(dplyr)
+library(sp)
+library(rgdal)
+library(maptools)
+library(tmap)
+library(grid)
+library(gridExtra)
+library(ggthemes)
+library(geosphere)
+library(rgeos)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+setwd("/Users/meijia/Documents/QMSS-G4063-Data-Visualization/Assignments/Assignment 2")
+
+subway_routes <- readOGR("nyc_subway_map/routes_nyc_subway/.", "routes_nyc_subway_jan2017")
+
+subway_stops <- readOGR("nyc_subway_map/stops_nyc_subway/.", "stops_nyc_subway_jan2017") 
+
+base <- readOGR("neighbourhoods.geojson", "OGRGeoJSON")
+
+airbnb <- read.csv("airbnb_listings.csv", header = TRUE)
+
+variables <- c("id", "transit", "host_id", "host_listings_count", "latitude", "longitude", "room_type", "accommodates", "bathrooms", "bedrooms", "price", "availability_365", "number_of_reviews", "review_scores_rating", "neighbourhood_cleansed","neighbourhood_group_cleansed")
+
+data <- airbnb[ ,variables]
+data$price <- as.character(levels(data$price))[data$price]
+figure <- function(string) {
+  n <- nchar(string)
+  s <- substr(string, 2, n-3)
+}
+data$price <- lapply(data$price, FUN = figure)
+data$price <- as.numeric(sub(",", "", data$price))
+
+```
+
+# Task 1: Overall Location
+
+##### Map 1: location
+Below is the map that shows where in New York City AirBnB listings are located:
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+map_nyc <- get_map("New York City", zoom = 12, source = "google", maptype = "roadmap")
+
+base_nyc <- spTransform(base, CRS("+proj=longlat +datum=WGS84"))
+base_nyc <- fortify(base_nyc)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+location <- ggmap(map_nyc)
+location <- location + geom_point(aes(x = longitude, y = latitude), data = data, size = 0.3, alpha = 0.3, color = "red") + geom_polygon(aes(x=long, y=lat, group=group), size=0.4, color='black', data=base_nyc, alpha=0) +
+  ggtitle("Distribution of AirBnB listings")
+location
+
+```
+
+##### Map 2: density and hotspots
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+g <- ggmap(map_nyc)
+g <- g + geom_density2d(aes(x = longitude, y = latitude), data= data, 
+                   color="blue", size = 0.3, bins = 12) +
+  stat_density2d(aes(x = longitude, y = latitude, fill = ..level.., alpha = ..level..), data = data, geom = 'polygon') +
+  scale_fill_gradient2(low = 'green', mid = 'yellow', high = 'red') +
+  scale_alpha(range = c(0.1, 0.8)) +
+  theme(legend.position = 'none')
+
+(g <- g + annotate("text",x=-73.987325, y=40.758899, label="Times Square",
+             color="Dark Blue",fontface=1, size=3) +
+    annotate("text",x=-73.98, y=40.728, label="East Village",
+             color="Dark Blue",fontface=1, size=3) +
+  annotate("text", x = -73.955, y = 40.72, label = "Williamsburg", 
+           color = "Dark Blue", fontface = 1, size = 3)) 
+
+```
+
+Comparing the above map with the google map base map, we can tell that Times Square, East Village and Williamsburg are three hot spots that has highest density in terms of AirBnB listing.
+
+# Task 2: Renting out your appartment vs. permanent rentals
+
+First we need to set a standard and define what is "permanent rental". I used total rental days available > 270, which is 3 seasons as the bar. To compare permanent rentals across neighborhoods, I drew two maps: 1st is marked using total number of permanent rentals in a neighborhood; 2nd uses the percentage of permernent rentals among total rentals in a neighborhood.
+
+##### Map 3: Rental days > 270:
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+rental_1 <- filter(data, availability_365 > 270) %>%
+  group_by(neighbourhood_cleansed)%>%
+  summarize(total_nb = n())
+
+new_merge <- merge(base@data, rental_1, by.x = "neighbourhood", by.y = "neighbourhood_cleansed")
+base@data$total <- new_merge[match(base@data$neighbourhood, new_merge$neighbourhood),"total_nb"]
+
+tm_shape(base) + tm_fill("total", title = "total permanent rental") + 
+    tm_borders(alpha=.1) +  
+    tm_credits("Harlem", size = 0.6, position = c(0.535, 0.725)) +
+    tm_credits("Williamsburg", size = 0.6, position = c(0.514, 0.497)) +
+    tm_credits("Bedford-Stuyvesant", size = 0.6, position = c(0.52, 0.442)) +
+    tm_credits("Bushwick", size = 0.6, position = c(0.578, 0.47)) +
+    tm_credits("East Village", size = 0.6, position = c(0.472, 0.522)) +
+    tm_credits("Hell's Kitchen", size = 0.6, position = c(0.43, 0.6)) +
+    tm_credits("Upper West", size = 0.6, position = c(0.475, 0.65)) +
+    tm_credits("Upper East", size = 0.6, position = c(0.515, 0.62)) +     
+    tm_borders(alpha=.1) +  
+    tm_compass(position=c(0.87, 0.06), type="8star", size=2, show.label=2) +
+    tm_layout("Number of Permanent Rentals by Neighborhood",
+          legend.title.size = 1,
+          legend.text.size = 0.7,
+          legend.position = c("left","top"),
+          legend.bg.alpha = 0)
+
+```
+
+From Map 3 we can clearly see that Williamsburg, Bedford-Stuyvesant and Bushwick (which are west Brooklyn) and East Village, Harlem have a large number of permanent rentals. However, we need to note that the large number of permanent rental might be due to the large size of neighborhood or the large total number of rentals in there. This is why we need a second map using percentage.
+
+##### Map 4: rental > 270 by percentage
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+rental_pc <- group_by(data, neighbourhood_cleansed) %>%
+  summarize(n = n(), rent = sum(availability_365> 270)) %>%
+  mutate(freq = rent/n)
+
+new_merge2 <- merge(base@data, rental_pc, by.x = "neighbourhood", by.y = "neighbourhood_cleansed")
+base@data$percent <- new_merge2[match(base@data$neighbourhood, new_merge2$neighbourhood),"freq"] 
+
+tm_shape(base) + tm_fill("percent", title = "Percentage for Days > 270") +
+  tm_credits("Mariners Harbor", size = 0.6, position = c(0.09, 0.34)) +
+  tm_credits("Springfield Gardens", size = 0.6, position = c(0.84, 0.4)) +
+  tm_credits("Far Rockaway", size = 0.6, position = c(0.88, 0.25)) +
+  tm_credits("canarsie", size = 0.6, position = c(0.61, 0.34)) +
+  tm_credits("Brownsville", size = 0.6, position = c(0.65, 0.4)) +
+  tm_credits("Williamsbridge", size = 0.6, position = c(0.65, 0.9)) + 
+  tm_credits("St. Albans", size = 0.6, position = c(0.92, 0.57)) +
+  tm_credits("Kew Gardens", size = 0.6, position = c(0.811, 0.56)) +
+  tm_credits("East Elmhurst", size = 0.6, position = c(0.718, 0.733)) +
+  tm_credits("Bay Terrace", size = 0.6, position = c(0.8, 0.8)) +
+  tm_credits("Bellerose", size = 0.6, position = c(0.96, 0.67)) +
+  tm_credits("Eastchester", size = 0.6, position = c(0.76, 0.86)) +
+  tm_credits("New Springville", size = 0.6, position = c(0.14, 0.2)) +
+  tm_credits("Emerson Hill", size = 0.6, position = c(0.2, 0.29)) +
+  tm_credits("Belle Harbor", size = 0.6, position = c(0.7, 0.2)) +
+  tm_credits("Clason Point", size = 0.6, position = c(0.75, 0.68)) +
+  tm_credits("Mill Basin", size = 0.6, position = c(0.545, 0.28)) +
+  tm_borders(alpha=.1) +
+  tm_compass(position=c(.87, .06), type="8star", size=2, show.label=2) +
+  tm_layout("Percentage of Permanent Rentals by Neighborhood",
+          legend.title.size = 1,
+          legend.text.size = 0.7,
+          legend.position = c("left","top"),
+          legend.bg.color = "white",
+          legend.bg.alpha = 0)
+
+```
+
+In contrast to the previous map using absolute number of rentals, the distribution of high density permanent rentals are quite distributed using percentage approach. 
+
+We need to note that while this approach can reduce the problem of map 3, some of the neighborhoods are high in percentage because there are few rentals, which also happen to be permanent. For example, there is only one rental in Emerson Hill in Staten Island it happens to be permanent rental - this makes the percentage of permernent rentals in the neighborhood 100%, yet we cannot conclude this is a hot spot. 
+
+Therefore, I included some neighborhoods in the second tier (0.6 - 0.8) after sortinging the data and looking at the frequency and exact total number in the neighborhood so that the annotation now makes more sense.
+
+##### Map 5: Scatter Plot by Color for 4 Season Rentals
+
+Map 5 is a scatter plot of the distribution of all AirBnB listings, the color of which differes in 4 catergories: days avaiable smaller than 1 season, between 1 and 2 seasons, between 2 and 3 seasons, and above 3 seasons.
+The purpose of this map is that, since we selected 270 days as the criteria of "permernent rentals", this 4 cut-offs can facilitate us and make complement in studying distribution of rentals in terms of studying (semi)permenent rental, also it can show the robustness of choosing 270 days as standard.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+data$availability[data$availability_365 <= 90] <- "1"
+data$availability[data$availability_365 > 90 & data$availability_365 <= 180] <- "2"
+data$availability[data$availability_365 > 180 & data$availability_365 <= 270] <- "3"
+data$availability[data$availability_365 > 270] <- "4"
+data$availability <- factor(data$availability, labels = c("0-90", "91-180", "181-270", "271-365"))
+
+```
+
+##### Plot 1: Borough - Number of Permanent Rentals by borough
+First, let's look at the number of permanent rentals in a neighborhood in each of 5 boroughs.
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+data_bou <- filter(data, availability_365 > 270) %>%
+  group_by(neighbourhood_group_cleansed, neighbourhood_cleansed) %>%
+  summarize(number = n())
+
+p1 <- ggplot(data = data_bou, aes(x=neighbourhood_group_cleansed,y=number)) 
+p1 <- p1 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Number of Permanent Rentals per Neighborhood")
+
+data_pc <- group_by(data, neighbourhood_group_cleansed, neighbourhood_cleansed) %>%
+  summarize(n = n(), rent = sum(availability_365 > 270)) %>%
+  mutate(freq = rent/n)
+
+p2 <- ggplot(data = data_pc, aes(x=neighbourhood_group_cleansed,y=freq)) 
+p2 <- p2 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Percentage of Permanent Rentals per Neighborhood")
+
+pc0 <- grid.arrange(p1, p2, ncol = 1, top = "Permanent Rental per Neighborhood by Bourough")
+
+```
+
+The above boxplot nicely shows us that in terms of total number of permanent rentals, Manhhatann stands out in terms of average and quantile range, followed by Brooklyn; in terms of percentage, Manhattant is the lowest, its range also is the smallest among the five. 
+
+##### Estimate Average Monthly Income from Permanent Rentals:
+Using availability can over estimate the income since being available does not equal to being rented out; but they are positively correlated so it makes sense to use as an indicator, though lack accuracy. 
+I set days per month = 30.
+
+The average monthly income across the five boroughs is 1.69251e+12; the monthly income by neighborhood summarized in bourough can be shown in the boxplot below.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+data_perm <- filter(data, availability_365 > 270)
+data_perm$income <- data_perm$price * data_perm$availability_365
+avg_nyc <- (sum(data_perm$income) / 12 * nrow(data_perm))
+
+avg_nb <- group_by(data_perm, neighbourhood_group_cleansed, neighbourhood_cleansed) %>%
+  summarize(p = mean(price), d = mean(availability_365))
+avg_nb$income <- avg_nb$p * avg_nb$d/12
+
+
+gi <- ggplot(data = avg_nb, aes(x=neighbourhood_group_cleansed, y=income)) + 
+             geom_boxplot() +
+  xlab("Borough") + ylab("Average Monthly Income") +
+  ggtitle("Average Monthly Income for Neighborhoods in NYC") 
+gi
+
+```
+
+As can be seen from the plot, the average monthly income is highest in Manhantan, followed by Brooklyn. This is likely since the average rental price in Manhattan is higher. The quantile range in Manhattan is the largest too, this might be due to the days available have mediated the effect of high price.
+
+###### How permanent rental differ from sporadic rental:
+We take a closer look at permanent rental and sporadic rental and try to depict and summarize the difference between the two.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+data_pmn <- filter(data, availability_365 > 270) %>%
+  select(host_listings_count, room_type, accommodates, bathrooms, bedrooms, price, number_of_reviews, review_scores_rating)
+
+data_spo <- filter(data, availability_365 <= 270) %>%
+  select(host_listings_count, room_type, accommodates, bathrooms, bedrooms, price, number_of_reviews, review_scores_rating)
+
+```
+
+To better visualize and show the difference of the permanent and sporadict rental, I used boxplots to depict the difference in mean, in terms of variables Accomodates, Bedrooms, Number of Reviews, and Review Scores Ratings. The direct visual effect by four boxplot makes us easier and more efficiently and clearly to understand the distribution and mean of the four variables.
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Income Distribution by Neighborhood:
+g2 <- ggmap(map_nyc) +
+   geom_polygon(aes(x=longitude,y=latitude, color=data$availability), data=data, 
+                    size=0.3, alpha=0.5) +
+  scale_color_manual(values=c("cornsilk", "blanchedalmond", "coral", "chocolate")) +
+  geom_polygon(aes(x=long, y=lat, group=group),
+  size=0.4, color='red', data=base_nyc, alpha=0)
+
+new_merge3 <- merge(base@data, avg_nb, by.x = "neighbourhood", by.y = "neighbourhood_cleansed")
+base@data$income <- new_merge3[match(base@data$neighbourhood, new_merge3$neighbourhood),"income"] 
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Get the Mean:
+data_mean_pmn <- filter(data, availability_365 > 270) %>%
+  group_by(neighbourhood_group_cleansed, neighbourhood_cleansed)%>%
+  select(host_listings_count, room_type, accommodates, bathrooms, bedrooms, price, number_of_reviews, review_scores_rating) %>%
+   summarize(listings_count = mean(host_listings_count, na.rm = TRUE), accomodates = mean(accommodates, na.rm = TRUE), bathrooms = mean(bathrooms, na.rm = TRUE), bedrooms = mean(bedrooms, na.rm = TRUE), number_of_reviews = mean(number_of_reviews, na.rm = TRUE), review_scores_rating = mean(review_scores_rating, na.rm = TRUE))
+
+data_mean_spo <- filter(data, availability_365 <= 270) %>%
+  group_by(neighbourhood_group_cleansed, neighbourhood_cleansed)%>%
+  select(host_listings_count, room_type, accommodates, bathrooms, bedrooms, price, number_of_reviews, review_scores_rating) %>%
+   summarize(listings_count = mean(host_listings_count, na.rm = TRUE), accomodates = mean(accommodates, na.rm = TRUE), bathrooms = mean(bathrooms, na.rm = TRUE), bedrooms = mean(bedrooms, na.rm = TRUE), number_of_reviews = mean(number_of_reviews, na.rm = TRUE), review_scores_rating = mean(review_scores_rating, na.rm = TRUE))
+
+#Plot
+p3 <- ggplot(data = data_mean_pmn, aes(x=neighbourhood_group_cleansed, y=accomodates)) 
+p3 <- p3 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Accomodates of Permanent Rentals per Neighborhood")
+
+p4 <- ggplot(data = data_mean_spo, aes(x=neighbourhood_group_cleansed, y=accomodates)) 
+p4 <- p4 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Accomodates of Sporadic Rentals per Neighborhood")
+
+pc01 <- grid.arrange(p3, p4, ncol = 1, top = "Accomodates per Neighborhood by Bourough")
+
+p5 <- ggplot(data = data_mean_pmn, aes(x=neighbourhood_group_cleansed, y=bedrooms)) 
+p5 <- p5 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Bedrooms of Permanent Rentals per Neighborhood")
+
+p6 <- ggplot(data = data_mean_spo, aes(x=neighbourhood_group_cleansed, y=bedrooms)) 
+p6 <- p6 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Bedrooms of Sporadic Rentals per Neighborhood")
+
+pc02 <- grid.arrange(p5, p6, ncol = 1, top = "Bedrooms per Neighborhood by Bourough")
+
+p7 <- ggplot(data = data_mean_pmn, aes(x=neighbourhood_group_cleansed, y=number_of_reviews)) 
+p7 <- p7 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Number of Reviews of Permanent Rentals per Neighborhood")
+
+p8 <- ggplot(data = data_mean_spo, aes(x=neighbourhood_group_cleansed, y=number_of_reviews)) 
+p8 <- p8 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Number of Reviews of Sporadic Rentals per Neighborhood")
+
+pc03 <- grid.arrange(p7, p8, ncol = 1, top = "Number of Reviews per Neighborhood by Bourough")
+
+p9 <- ggplot(data = data_mean_pmn, aes(x=neighbourhood_group_cleansed, y=review_scores_rating)) 
+p9 <- p9 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Review Scores Rating of Permanent Rentals per Neighborhood")
+
+p10 <- ggplot(data = data_mean_spo, aes(x=neighbourhood_group_cleansed, y=review_scores_rating)) 
+p10 <- p10 + geom_boxplot() +
+    coord_flip() +
+    labs(x="", y="Review Scores Rating of Permanent Rentals per Neighborhood")
+
+pc04 <- grid.arrange(p9, p10, ncol = 1, top = "Review Scores Rating per Neighborhood by Bourough")
+
+```
+
+The above 8 boxplots can give us many useful statistics regarding mean, range, outliers etc., on the facts of AirBnB in different boroughs by neighborhood. 
+
+# Problem 3
+As shown in the project plan, while there is a large chance that the nearest subway station are in the neighboring neighborhood such as Greenwich Village, we simply this problem and exclude those cases.
+
+##### East Village: distribution of AirBnB and Station
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+ev <- filter(data, neighbourhood_cleansed == "East Village")
+ev <- filter(ev, ev$availability_365 > 270)
+coordinates(ev) <- ~ longitude + latitude
+proj4string(ev) <- proj4string(base)
+
+ev_stops <- subway_stops@data[, c(4, 3, 2)]
+names(ev_stops) <- c("Longitude", "Latitude", "station")
+coordinates(ev_stops) <- ~ Longitude + Latitude
+proj4string(ev_stops) <- proj4string(base)
+n_stop <- over(ev_stops, base)
+ev_stops <- subway_stops[c(194, 195, 188, 183, 133), ]
+
+nbb <- base$neighbourhood == "East Village"
+new_nb <- base[nbb, ]
+proj4string(new_nb) <- proj4string(base)
+tm1 <- tm_shape(new_nb) + tm_borders() + tm_shape(ev) + tm_dots(size = 0.2, col = "purple", alpha = 0.7) + tm_shape(subway_routes) + tm_lines(col = "route_id") + tm_shape(ev_stops) + tm_dots(size = 0.4, col = "brown", alpha = 0.8) + tm_text("stop_name", size = 0.8) 
+tm1
+
+```
+
+##### Create Buffer
+Below I created 2 buffers (500m and 1000m) around 1 Ave Station. It is the closest subway station to neighborhoods in the dotted points.
+
+```{r, echo=FALSE}
+ev_stops <- spTransform(ev_stops, CRS("+proj=longlat +datum=WGS84"))
+d <- as.data.frame(distm(ev_stops@coords, ev@coords, fun = distHaversine))
+row.names(d) <- c("3 Ave", "1 Av", "2 Av", "Broadway-Lafayette St","Astor Pl")
+minimum <- apply(d, 2, FUN = min)
+d_min <- data.frame()
+for (i in 1:length(minimum)){
+  d_min[i,1] = row.names(d)[which.min(d[,i])]
+  d_min[i,2] = minimum[i]
+}
+names(d_min) <- c("nearest_stop", "min_dist")
+
+in_buffer <- as.data.frame(cbind(ev@coords, d_min), stringsAsFactors = FALSE)
+in_buffer <- filter(in_buffer, in_buffer$nearest_stop == "1 Av" & in_buffer$min_dist <= 1000)
+coordinates(in_buffer) <- ~ longitude + latitude
+proj4string(in_buffer) <- proj4string(base)
+ave1 <- ev_stops[2, ]
+ave1$name <- "1 Av"
+tm2 <- tm_shape(base[nbb, ]) + tm_borders(col = "black", lwd = 2) + tm_shape(ave1) + tm_dots(col="red", size=0.5) + tm_text("name", size=0.8)
+
+buffer <- spTransform(ave1, CRS(" +init=epsg:2262 +zone=18 +ellps=WGS84 +datum=WGS84 +units=m +no_defs +towgs84=0,0,0")) 
+buffer_500 <- gBuffer(spgeom = buffer, width = 500)
+buffer_1000 <- gBuffer(spgeom = buffer, width = 1000)
+tm2 + tm_shape(buffer_500) + tm_borders(col="orange") +
+  tm_shape(buffer_1000) + tm_borders(col="orange") + 
+  tm_shape(subway_routes) + 
+  tm_lines(col = "route_id") +
+  tm_shape(in_buffer) +
+  tm_dots(size = 0.2, col = "brown", alpha = 0.8)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+subway_routes <- spTransform(subway_routes, CRS("+proj=longlat +datum=WGS84"))
+subway_routes <- fortify(subway_routes)
+
+subway_stops <- spTransform(subway_stops, CRS("+proj=longlat +datum=WGS84"))
+subway_stops <- fortify(subway_stops@data)
+
+subway <- read.csv("NYC_Transit_Subway_Entrance_And_Exit_Data.csv")
+sp1 <- select(data, latitude, longitude)
+sp2 <- select(subway, Station.Latitude, Station.Longitude)
+
+rental_sp <- SpatialPoints(sp1)
+subway_sp <- SpatialPoints(sp2)
+data$dist_to_subway <- apply(distm(rental_sp, subway_sp), 1, min)
+
+```
+
+##### Scatterplot to explore relationship between price and distance
+
+Below is a scatterplot on the relationship between distance to closest subway and the price per night. The size of the points represent the number of reviews received, which is a measurement of the popularity of the rental and the days available. 
+
+From the plot we can see that there is a slight decrease in price as the distance to closest subway station increases, wchi manefests common sense.
+
+```{r, echo=FALSE,warning=FALSE, message=FALSE}
+dd <- subset(data, dist_to_subway <= 200 & neighbourhood_cleansed == "East Village")
+gs <- ggplot(dd, aes(x = dist_to_subway, y = price, color = number_of_reviews)) + 
+  geom_point(alpha = 0.4) + 
+  scale_size_continuous(name = "number of reviews") +
+  geom_smooth(method = "lm", color = "red")+
+  ylim(0, 500) +
+  ylab("price") + 
+  xlab("distance to closest subway") +
+  ggtitle("AirBnB Price and its Minimum Distance to Subway Station") +
+  theme_tufte() +
+  theme(plot.title = element_text(
+    face = "bold", color = "black", size = 13, hjust = 0.5),
+    legend.position = "top")
+gs
+
+```
+
+##### Statistical Regression Support:
+```{r, echo=FALSE,warning=FALSE, message=FALSE}
+reg <- lm(price~dist_to_subway+bedrooms + accommodates + bathrooms + room_type + number_of_reviews + review_scores_rating, data = data)
+summary(reg)
+
+```
+
+As can be seen from the result, for permanent AirBnB, distance to subway, number of bedrooms, number of bathrooms, room type and review socores rating all have a statistically significant and positive relationship with the price. Surprisingly, controlling for all other factors in the model, the distance of AirBnB to subway is positively related with price, which means, the further the apartment is to subway station, the more expensive it is. However, the coefficient is small so on average, the increase in price can be marginal. It makes sense that the correlation between number of bedrooms and bathrooms has a positve effect. In reference to entire home, private room and shared room are all more expensive on average. All else equal, the number of reviews has no statistically significant relationship with price. 
+

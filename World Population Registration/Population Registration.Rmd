@@ -1,0 +1,251 @@
+---
+title: "Population Registration"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+setwd("/Users/meijia/Desktop/Assignments")
+d <- read.csv("ID4D.csv", header = T, nrows = 198)
+
+columns <- c("Economy", "Region", "Level", "CR.Yr", "CR.M", "CR.Dur", "CR.Cost", "NID.Yr", "NID_B", "NID_M", "NID.Age", "NID.Cost", "e.ID.Yr", "e.ID",
+             "Card", "e.ID.Services", "D.Sign", "R.Use", "Produced", "e.P", "e.P.Yr", "Valid", "Population", "Reg.Pop..", "Unregist.Population", "Unreg.15.",
+             "Unreg.5.14", "Unreg.0.4", "Status", "PR", "CL", "Birth.Reg..")
+
+d <- d[ ,columns]
+
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(grid)
+library(gridExtra)
+```
+
+### (1) Global Pattern of Registration Rate
+
+According to the World Bank, current government practice of population registration include: Birth registration, National Identification, Electronic Identification (E-ID), and Electronic Passport (E-Passport). Population registration plays an important role in citizen management and is becoming more and more common in most countries. For the majority of countries, National ID is not issued at birth, but is mandatory.
+
+First let's gain a macroscoptic concept of the statistic and geographical distribution of Birth Registration rate and National Registration Rate from the plot below. 
+
+
+```{r, echo = FALSE}
+d$Region <- factor(d$Region, labels = c("Other","AFR", "EAP", "ECA", "LCR", "MNA", "SAR"))
+
+pc1 <- ggplot(d, aes(x = Birth.Reg.., y = Reg.Pop.., color = Region)) 
+pc2 <- pc1 + geom_point() +
+  geom_smooth(aes(group = 1),
+              method = "lm",
+              formula = y~log(x),
+              se = FALSE,
+              color = "red") 
+
+pointsToLabel <- c("Australia", "Bolivia", "China","Egypt", "Fiji", "Guinea", "India", "Japan", "Mexico", "Nigeria", "Qatar", "Russian Federation", "Saudi Arabia", "Sudan",  "Zimbabwe", "United States of America", "United Kingdom", "Ethopia", "Cambodia", "Liberia", "Yemen", "Bangladesh", "Afghanistan", "Tuvalu", "Indonesia", "Jordan", "Monaco", "Palestine", "Mali", "Libya","Venezuela, RB", "Micronesia, Fed. Sts.", "Eritrea", "Vanuatu", "Papua New Guinea", "Cameroon", "Bahamas", "Burkina Faso", "Bolivia", "Tajikistan", "Philippines", "Singapore", "Germany", "Portugal", "New Zealand")
+
+
+pc3 <- pc2 + geom_text(aes(label = Economy),
+                       color = "gray20", size = 2.5,
+                       data = filter(d, Economy %in% pointsToLabel))
+pc4 <- pc3 + 
+  labs(x = "Birth Registration Rate", y = "National Registration Rate") + 
+  theme_minimal() +
+  guides(color = guide_legend(nrow = 1)) +
+  ggtitle("Plot 1: National ID and Birth Registration Rate (Jan 2016)") +
+  theme(legend.position = c("top"), 
+          legend.direction = "horizontal",
+          legend.justification = 0.05,
+          legend.text = element_text(size = 10, color = "gray10"),
+          legend.key.height=unit(1,"line"),
+          legend.key.width=unit(3,"line"),
+          axis.text = element_text(face = "italic"),
+          axis.title.x = element_text(vjust = -1), 
+          axis.title.y = element_text(vjust = 2), 
+          axis.ticks.y = element_blank(), 
+          axis.line = element_line(color = "gray40", size = 0.5),
+          axis.line.y = element_blank(),
+          panel.grid.major = element_line(color = "gray50", size = 0.5),
+          panel.grid.major.x = element_blank(),
+          plot.margin = margin(t = 0, r = 0, b = 40, l = 5, unit = "pt"),
+          plot.title = element_text(face = "bold", color = "black", size = 15)
+          )
+
+pc4
+```
+
+From plot 1 we can clearly see that countries with a higher birth registration rate tend to have a higher national registration rate. Regionally, African countries (AFR) have a large span in birth registration rate, and national registration rate are below 50% for the majority, which is extremely low. East Asia and Pacific countries also have a large variance in terms of birth registration rate, but are right skewed for both two indexes, which is due to the large coverage of this area. European and Central Asia (ECA) and Middle East and North Africa (MNA) have a very high birth registration rate, yet their national registration rate has a large standard deviation, and MNA countries are even lower, ranging from below 10% for Saudi Arabia to above 90% in Qatar. 
+
+Looking at the top left of the plot, we can tell that the top 10 succesful countries in population registration are: Hungary, Netherlands, Portugal, Denmark, China, Albania, Austria, New Zealand, Ireland, and Czech Republic. 
+
+### (2) Behind the figures: the role of social economic development level
+
+The above regional distribution and difference in registration rate makes us wonder the reason behind. Aside from political factors, where China is a special case, it seems that the above regional difference represent developmental level of an economy.
+
+Thus using income level, freedom status score, political rights score, and civil liberties score as social and economic development indicators, Plot 2 shows how the economic and politic development level of an economy is related to the percentage of population registered. Note that for political rights score and civil liberties score, 1 = best and 7 = worst. 
+
+```{r, echo = FALSE}
+reg <- cbind(d$Region, d$Level, d$Reg.Pop.., d$Status, d$PR, d$CL)
+reg <- as.data.frame(reg)
+colnames(reg) <- c("Region", "Level", "Percent Registered", "Freedom Status", "Political Rights", "Civil Liberties")
+reg$Region <- factor(reg$Region, labels = c("Other", "AFR", "EAP", "ECA", "LCR", "MNA", "SAR"))
+
+# Registered and Income Level
+reg_level <- cbind(d$Reg.Pop.., d$Level, d$Region)
+reg_level <- as.data.frame(reg_level)
+colnames(reg_level) <- c("Percent Registered", "Income Level", "Region")
+reg_level$`Income Level` <- factor(reg_level$`Income Level`, levels = c(1, 2, 3, 4), labels = c("HIC", "LIC", "LMIC", "UMIC"))
+reg_level$Region <- factor(reg_level$Region, labels = c("Other", "AFR", "EAP", "ECA", "LCR", "MNA", "SAR"))
+
+# Registered and Freedom Status
+reg_free <- cbind(d$Reg.Pop.., d$Status, d$Region)
+reg_free <- as.data.frame(reg_free)
+colnames(reg_free) <- c("Percent Registered", "Freedom Status", "Region")
+reg_free$`Freedom Status` <- factor(reg_free$`Freedom Status`, labels = c("Free", "Not Free", "Partially Free"))
+reg_free$Region <- factor(reg_free$Region, labels = c("Other", "AFR", "EAP", "ECA", "LCR", "MNA", "SAR"))
+
+# Registered and Political Rights
+reg_pol <- cbind(d$Reg.Pop.., d$PR, d$Region)
+row_sub <- apply(reg_pol, 1, function(row) all(row !=0 ))
+reg_pol <- reg_pol[row_sub, ]
+reg_pol <- as.data.frame(reg_pol)
+colnames(reg_pol) <- c("Percent Registered", "Political Rights", "Region")
+reg_pol$`Political Rights` <- factor(reg_pol$`Political Rights`, levels = c(2,3,4,5,6,7,8), labels = c("1", "2", "3", "4", "5", "6", "7")) # 1 is best
+reg_pol$Region <- factor(reg_pol$Region, labels = c("Other", "AFR", "EAP", "ECA", "LCR", "MNA", "SAR"))
+reg_pol <- na.omit(reg_pol)
+
+# Registered and Civil Liberties
+reg_lib <- cbind(d$Reg.Pop.., d$CL, d$Region)
+row_sub2 <- apply(reg_lib, 1, function(row) all(row !=0 ))
+reg_lib <- reg_lib[row_sub2, ]
+reg_lib <- as.data.frame(reg_lib)
+colnames(reg_lib) <- c("Percent Registered", "Civil Liberties", "Region")
+reg_lib$`Civil Liberties` <- factor(reg_lib$`Civil Liberties`, levels = c(2,3,4,5,6,7,8), labels = c("1", "2", "3", "4", "5", "6", "7")) # 1 is best
+reg_lib$Region <- factor(reg_lib$Region, labels = c("Other", "AFR", "EAP", "ECA", "LCR", "MNA", "SAR"))
+reg_lib <- na.omit(reg_lib)
+
+```
+
+```{r, echo = FALSE}
+p_level <- ggplot(data = reg_level, aes(x = reorder(`Income Level`, `Percent Registered`), y = `Percent Registered`))
+p_level <- p_level + geom_boxplot() + labs(x = "Income Level", y = "Percent Registered") + theme_tufte()
+
+p_free <- ggplot(data = reg_free, aes(x = reorder(`Freedom Status`, `Percent Registered`), y = `Percent Registered`)) + geom_boxplot()
+p_free <- p_free + geom_boxplot() + labs(x = "Freedom Status", y = "Percent Registered") + theme_tufte()
+
+p_pol <- ggplot(data = reg_pol, aes(x = reorder(`Political Rights`, `Percent Registered`), y = `Percent Registered`)) + geom_boxplot()
+p_pol <- p_pol + geom_boxplot() + labs(x = "Political Rights", y = "Percent Registered") + theme_tufte()
+
+p_lib <- ggplot(data = reg_lib, aes(x = reorder(`Civil Liberties`, `Percent Registered`), y = `Percent Registered`)) + geom_boxplot()
+p_lib <- p_lib + geom_boxplot() + labs(x = "Civil Liberties", y = "Percent Registered") + theme_tufte()
+
+pc0 <- grid.arrange(p_level, p_free, p_pol, p_lib, ncol = 2, top = "Plot 2: SEC Factors and Registration Rate")
+
+```
+
+The 4 boxplots show a pattern that as the income level, freedom status, political rights and civil liberties increase, the mean of population registration rate goes up. 
+
+### Some Evidence: 
+Plot 3 below is the percentage of unregistered population in three age groups and by 4 income levels.
+
+The low percentage unregistered for high income countries can be explained by its low birth rate and 
+its wide population registration implementation. 
+
+For lower middle and lower income level economies, the large percentage of unregistered population below age 5 indicates its high birth rate, as well as its ineffectiveness in implementing the registration, which might be due to lack of funding or government support. 
+
+```{r, echo=FALSE}
+d4 <- cbind.data.frame(d$Unregist.Population, d$Unreg.0.4, d$Unreg.5.14, d$Unreg.15., d$Level)
+d4[d4 == "-"] <- NA
+d4 <- na.omit(d4)
+colnames(d4) <- c("Unregistered Total", "Unregistered 0-4", "Unregistered 5-14", "Unregistered 15+", "Income Level")
+
+d4$`Income Level` <- as.numeric(d4$`Income Level`)
+d4$`Unregistered Total` <- as.numeric(d4$`Unregistered Total`)
+d4$`Unregistered 0-4` <- as.numeric(d4$`Unregistered 0-4`)
+d4$`Unregistered 5-14` <- as.numeric(d4$`Unregistered 5-14`)
+d4$`Unregistered 15+` <- as.numeric(d4$`Unregistered 15+`)
+
+d5 <- group_by(d4, `Income Level`) %>%
+  mutate(p_04 = `Unregistered 0-4`/`Unregistered Total`,
+         p_514 = `Unregistered 5-14`/`Unregistered Total`,
+         p_15 = `Unregistered 15+`/`Unregistered Total`)
+
+d6 <- group_by(d5, `Income Level`) %>%
+  summarize(m04 = mean(p_04),
+            m514 = mean(p_514),
+            m15 = mean(p_15))
+
+d7 <- read.csv("Income Level and Unregistration.csv", header = TRUE)
+d7$Age.Group <- factor(d7$Age.Group, labels = c("0-4 age", "5 - 14 age", "15 + age"))
+
+(p_unreg <- ggplot(data = d7, aes(x = Income.Level,y = Percent.Unregistered, fill = Age.Group)) +
+  geom_bar(stat = 'identity') +
+  labs(x = "Income Level", y ="Percent Unregistered") +
+  theme(legend.position="top") + 
+  ggtitle("Plot 3: Unregistered Population by Age Group and Income Level") +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "gray50", size = 0.5),
+  panel.grid.major.x = element_blank(),
+  legend.position = c("top"), 
+  legend.direction = "horizontal",
+  legend.justification = 0.05,
+  legend.text = element_text(size = 10, color = "gray10"),
+  legend.key.height=unit(1,"line"),
+  legend.key.width=unit(3,"line")))
+
+```
+
+
+So now we see the discrepancy in registration rate can be captured by the difference between developed and less developed countries. We cannot help questioning, since when did this discrepancy start? 
+
+### (3) Trace back: discrepancy not formed in one day
+
+Social and economic development has a long history, whose accumulated effect has shaped the current setup of the world. So does population registration practice also follow the same development pattern? Do the current more developed countries also the pioneers of this practice? Can we define it as an indicator of social pregress?
+
+Plot 3 shows that population registration started in 1850 and by now has a history of 167 years of history. Netherland is the first country to start the population registration practice, and this explains why we see in Plot 1 that it has the second highest National Registration rate worldwide.
+
+We can tell from the graph that, current high income and upper middle income countries started with the practice 100 or more years earlier than the current lower middel income and low income countries. All countries experience a steady increase, and lower income countries particularly steep in the 2010s, but it still will take years to catch up, just as the time and effort that would be needed to catch up in social and economic development level.
+
+```{r, echo=FALSE, out.width = "90%"}
+d3 <- cbind.data.frame(d$NID.Yr, d$e.ID.Yr, d$Level)
+d3[d3 == "-"] <- NA
+d3 <- na.omit(d3)
+colnames(d3) <- c("N-ID Year", "E-ID Year", "Income Level")
+
+by_NID <- group_by(d3, `Income Level`,`N-ID Year`) %>%
+  summarize(total.count = n()) %>%
+  mutate(cumsum = cumsum(total.count))
+by_NID$`Income Level` <- factor(by_NID$`Income Level`, levels = c("HIC", "UMIC", "LMIC", "LIC")) 
+        
+p_NID <- ggplot(data = by_NID, aes(x = `N-ID Year`, y = cumsum))
+p_NID <- p_NID + geom_line(aes(group = `Income Level`, color = `Income Level`)) +
+  labs(x = "Year", y = "Number of Economy") +
+  ggtitle("National Registration Rate by Year") +
+  scale_x_discrete(breaks= seq(1850, 2020, 10)) + 
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "gray50", size = 0.5),
+  panel.grid.major.x = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+
+### Future: a Replay? --------------------------------------------
+
+by_EID <- group_by(d3, `Income Level`,`E-ID Year`) %>%
+  summarize(total.count = n()) %>%
+  mutate(cumsum = cumsum(total.count))
+by_EID$`Income Level` <- factor(by_EID$`Income Level`, levels = c("HIC", "UMIC", "LMIC", "LIC")) 
+
+
+p_EID <- ggplot(data = by_EID, aes(x = `E-ID Year`, y = cumsum))
+p_EID <- p_EID + geom_line(aes(group = `Income Level`, color = `Income Level`)) +
+  labs(x = "Year", y = "Number of Economy") +
+  ggtitle("E-ID Registration Rate by Year") +
+  scale_x_discrete(breaks= seq(1990, 2020, 3))+
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "gray50", size = 0.5),
+  panel.grid.major.x = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+
+grid.arrange(p_NID, p_EID, ncol=2)
+
+```
+
+### (4) Future: a replay?
+Currently 80% of the economy have launched E-ID, though at different stages: 11% for identification only, 55% used for several e-services, and 10% used in multiple e-services including online services and digital signature. The future of population identification is E-ID. From the Plot 4 we see that such practice started in 1999, and while the high and upper middle income countries have taken the lead, the advantage in years is not too long. We are seeing developing countries catching up with the usage of E-ID, and is almost as widely used as the traditional ID shown in Plot 3. Due to infrastructure, technology advancement, funding and other issues, it would be hard to see all countries go hand in hand, yet the positive trend seems optimistic this time.
